@@ -39,13 +39,15 @@ m_to_in=False
 def build_VV(eqdsk_file='g1051202011.1000',doMesh=False):
     cu.cmd('#reset')
     cu.cmd('undo off')
+    s_0 = cu.get_entities('surface')[-1]
+    v_0 = cu.get_entities('volume')[-1]
 
     # Load in boundary point coordinates
     rlim, zlim =  __load_boundary_gEqdsk(eqdsk_file)
     
     # Build permimter curve, rotation 360deg
     surf_ids = __build_surface(rlim, zlim)
-    
+    print(s_0,v_0,cu.get_entities('surface')[-1],cu.get_entities('volume')[-1])
     # Cut port holes
     __do_Cut_Ports(surf_ids)
     
@@ -87,7 +89,8 @@ def __load_boundary_gEqdsk(fname,doPlot=False):
     # Load eqdsk file
     try:
         with open(fname,'r') as f: eqdsk=geqdsk.read(f)
-    except:
+    except Exception as e:
+        print(e)
         with open(fname+'.json','r') as f: eqdsk=json.load(f)
         
     # Get boundary points, removing unmeshable or non-axisymmetric points
@@ -161,7 +164,7 @@ def __make_port_block(i,R,radial_deg,theta_0):
 def __subtract(curves,surf_ids,theta_0,thicken_depth):
     # Build sutraction object
     s1 = cu.create_surface(curves)
-    cu.cmd('Project Surface %d Onto Volume %d'%(s1.id(),surf_ids[188]) ) #13
+    cu.cmd('Project Surface %d Onto Volume %d'%(s1.id(),187) ) #13
     s1_id  = cu.get_entities('volume')[-1]
     cu.cmd('Thicken Volume %d Depth %f'%(s1_id, thicken_depth))
     
@@ -169,8 +172,9 @@ def __subtract(curves,surf_ids,theta_0,thicken_depth):
     cu.cmd('Volume %d Move %f %f 0'%(s1_id, \
           -thicken_depth*np.cos(theta_0*np.pi/180)/2, -thicken_depth*np.sin(theta_0*np.pi/180)/2) )
     
-    cu.cmd('Subtract Volume %d from volume %d'%(s1_id,surf_ids[188]))
-    print(s1_id,surf_ids[188])
+    cu.cmd('Subtract Volume %d from Volume %d'%(s1_id,103))
+    print(s1_id,surf_ids[189])
+    print(surf_ids)
     raise SyntaxError
 ##########################################################
 def __do_Mesh():
@@ -180,7 +184,7 @@ def __do_Mesh():
     
     
     cu.cmd("set duplicate block elements off")
-    string  = 'block 2 surface '
+    string  = 'block %d surface '%(len(cu.get_entities('block'))+1)
     for i in cu.get_entities('surface'): string+= '%d '%i
     cu.cmd(string)
     
@@ -191,7 +195,7 @@ def __do_Mesh():
     # cu.cmd('surface all sizing function type skeleton scale 10'+\
     #       ' time_accuracy_level 1 min_size .01')
     cu.cmd('Surface All Size 0.1')
-    cu.cmd("mesh block 2")
+    cu.cmd("mesh block %d"%(len(cu.get_entities('block'))+1))
     
     
     cu.cmd("set large exodus file on")
