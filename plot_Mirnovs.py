@@ -14,7 +14,7 @@ import cubit3 as cu
 import json
 import numpy as np
 
-def place_Mirnovs(sensor_set='Mirnov',limiter_only=True):
+def place_Mirnovs(sensor_set='Mirnov',limiter_only=True,m_to_in=False):
     
     if sensor_set == 'Mirnov':
         cu.cmd('Delete Volume in Mirnov')
@@ -35,17 +35,17 @@ def place_Mirnovs(sensor_set='Mirnov',limiter_only=True):
             # with CAD in Mirnov_Geometry within mirnov_Probe_Geometry]
                 phase_offset=0
                 R_adj = 0# 0.01 Movded to gen_MAGX_Coords
-                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id)
+                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in)
             elif 'O' in node_name: 
                 if limiter_only: continue
                 # Boom Extention [Top/Bot] Mirnovs
                 phase_offset=0
                 R_adj = 0# 0.01 Movded to gen_MAGX_Coords
-                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id)
+                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in)
             else: # Limiter side Mirnovs
                 phase_offset = 0
                 R_adj = 0# 0.01 Movded to gen_MAGX_Coords
-                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id)
+                __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in)
         #id_group = cu.create_new_group()
         cu.cmd('Group "Mirnov" Equals Volume %d to %d'%( sph_id[0],sph_id[-1]))
     
@@ -68,8 +68,16 @@ def place_Mirnovs(sensor_set='Mirnov',limiter_only=True):
         cu.cmd('Group "BP" Equals Volume %d to %d'%( sph_id[0],sph_id[-1]))
 
 # Helper function to place Mirnov sensors
-def __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id):
-    cu.cmd("create sphere radius %f"%.01)
+def __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in=False):
+    # Place Mirnov sensor at location
+    if m_to_in: 
+        R_adj/=0.0254
+        R[node_name]/=0.0254
+        Z[node_name]/=0.0254
+        sph_radius = 0.01/0.0254
+    else: sph_radius = 0.01 
+
+    cu.cmd("create sphere radius %f"%sph_radius)
     sph_id.append( cu.get_entities('volume')[-1] )
     cu.cmd("move volume %d X %f Y %f Z %f"%(sph_id[-1], \
             (R[node_name] + R_adj)*np.cos(phi[node_name]*np.pi/180 + phase_offset*np.pi/180), 

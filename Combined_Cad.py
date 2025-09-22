@@ -11,35 +11,35 @@ from Limiter_test import unsplit_limiter
 from cubit_header import thinCurr_path, save_path, cu, check_output, STDOUT
 
 ###############################################################################
-def do_CAD(doMesh=True,doMesh_all=True,doPlot_eqdsk=False):
+def do_CAD(doMesh=False,doMesh_all=True,doPlot_eqdsk=False):
     cu.cmd('reset')
     
-    grp_id_1 = unsplit_limiter(doMesh=doMesh,in_to_m=True,doReset=True,
+    grp_id_1,s_lims_1 = unsplit_limiter(doMesh=doMesh,in_to_m=True,doReset=True,
                                theta=0.62833062,buildSplit=True,
                                save_ext='_1',skip=[8,12,13])
     cu.cmd('Split Body 1 to 6')
     s_end_lim_1 = cu.get_entities('surface')[-1] # Necessary to track for meshing
     
-    grp_id_2 = unsplit_limiter(doMesh=doMesh,in_to_m=True,adj_face_id=True,
+    grp_id_2,s_lims_2 = unsplit_limiter(doMesh=doMesh,in_to_m=True,adj_face_id=True,
                                doReset=False,save_ext='_2', limiter_side_surfs=[241, 365])
     
     s_end_lim_2 = cu.get_entities('surface')[-1] # 
-    
+    return
     
     cu.cmd("export genesis 'C_Mod_ThinCurr_Limiters_Combined.g' block 1 to 2 overwrite")
 
-    #return
-    build_VV(s_id_wall=202,doReset=False,doMesh=doMesh,doPlot=doPlot_eqdsk) #14 # 104
+    return
+    build_VV(s_id_wall=204,doReset=False,doMesh=doMesh,doPlot=doPlot_eqdsk) #14 # 104
     s_end_vv = cu.get_entities('surface')[-1]
     
-    if doMesh_all: build_combined_mesh(s_end_lim_1, s_end_lim_2, s_end_vv)
+    if doMesh_all: build_combined_mesh(s_end_lim_1, s_end_lim_2, s_end_vv,s_lims_1,s_lims_2)
     else:  # Process Limiters and VV separately
         
         process_Thincurr('Limiters_Combined')
         process_Thincurr('VV')
     
 ###############################################################################
-def build_combined_mesh(s_end_lim_1, s_end_lim_2, s_end_vv):
+def build_combined_mesh(s_end_lim_1, s_end_lim_2, s_end_vv,s_lims_1,s_lims_2):
         cu.cmd('delete vertex all')
         cu.cmd('delete curve all')
         
@@ -51,10 +51,17 @@ def build_combined_mesh(s_end_lim_1, s_end_lim_2, s_end_vv):
         cu.cmd("surface all scheme trimesh")
         
         # Limiter 1, 2
-        cu.cmd('Surface 1 to %d Size 0.03'%s_end_lim_2) # Modifying this works somehow
-        cu.cmd('surface %d to %d sizing function type skeleton scale 10'%(1,s_end_lim_2)+\
-                 ' time_accuracy_level 1 min_size .0075')
-        
+        cu.cmd('Surface 1 to %d Size 0.02'%s_end_lim_2) # Modifying this works somehow
+        # Adjusting the mesh size for the limiter sides
+        s_ = ''
+        for i in s_lims_1: s_+= '%d '%i
+        cu.cmd(f'surface{s_} sizing function type skeleton scale 1'+\
+                 ' time_accuracy_level 3 min_size .05')
+        s_ = ''
+        for i in s_lims_2: s_+= '%d '%i
+        cu.cmd(f'surface{s_} sizing function type skeleton scale 1'+\
+                 ' time_accuracy_level 3 min_size .05')
+        # Mesh the two limiters
         cu.cmd("mesh surface %d to %d"%(1,s_end_lim_1))
         cu.cmd("mesh surface %d to %d"%(s_end_lim_1+1,s_end_lim_2))
         
@@ -82,4 +89,8 @@ def process_Thincurr(fname):
            ' %s'%save_path,  shell=True, stderr=STDOUT).decode('utf-8') )
     print(f'--- Saved C_Mod_ThinCurr_{fname}-homology.h5 to {save_path} ---')
 ###############################################################################
-if __name__ == '__main__': do_CAD()
+if __name__ == '__main__': 
+     
+    do_CAD()
+    # build_VV()
+    # process_Thincurr('VV')

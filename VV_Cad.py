@@ -190,6 +190,10 @@ def __do_Mesh(s_0, id_group,surf_ids, save_Ext):
     bl = len(cu.get_entities('block'))
     cu.cmd("set large exodus file on")
     cu.cmd("export genesis 'C_Mod_ThinCurr_VV%s.g' block %d overwrite"%(save_Ext,bl))
-
+    print(f'--- Saved C_Mod_ThinCurr_VV{save_Ext}.g to default Cubit directory ---')
+    print(s_0,id_group,surf_ids)
 ##########################
-    
+
+if __name__ == '__main__': 
+     
+    build_VV()

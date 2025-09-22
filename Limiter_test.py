@@ -32,6 +32,10 @@ def unsplit_limiter(in_to_m=True,eqdsk_file='g1051202011.1000',
     R_wall = __get_R_Wall(eqdsk_file,wall_offset)
     R_curve_minima = 36.42 # Radius of deepest curve of limiter
     # theta = -3.0105 origin to center of limiter angle
+    # Tile dimensions
+    tile_width = 1.46*0.0254 # m
+    tile_height = 1.237 *0.0254 # m
+    tile_limiter_offset = 0.017 # m, distance from tile front face to limiter surface
     
     # Shifts in x, y necessary because edges of limiter are parallel, not rays from origin
     x = lambda r,theta: r*np.cos(theta)
@@ -91,10 +95,14 @@ def unsplit_limiter(in_to_m=True,eqdsk_file='g1051202011.1000',
     for i in np.arange(s_start, s_end+1): string+= '%d '%i
     cu.cmd(string)
     
-    
+    ##########################################
+    # Building tiles to sit just in front of the limiter surface
+    __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, tile_height,\
+                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r)
+
     if doMesh: __do_Mesh(id_group,save_ext,s_lim_surf_l,s_lim_surf_r,s_start,s_end,limiter_side_surfs)
 
-    return id_group
+    return id_group, limiter_side_surfs
 ###################################################
 def __gen_unsplit_limiter_side(theta,R_wall,R_tile,R_curve_minima,Z_lim,Z_tile_lip,x,y):
     
@@ -228,14 +236,14 @@ def __make_arc_cutout(surf_id,R_tile,theta,Z_lim,Z_tile_lip,x,y,R_curve_minima):
     l_arc = cu.create_arc_curve(v_up_sub_tile,v_down_sub_tile,v_curve_tile_minima.coordinates())
     # Iterarte along curve
     for i in np.linspace(0,1,16,): 
-        cu.cmd("create vertex on curve %d fraction %f"%(l_arc.id(),i))
+        cu.cmd("create s_tile_upvertex on curve %d fraction %f"%(l_arc.id(),i))
         v_id =  cu.get_entities('vertex')[-1]
         surf_id = __cut_hole_vertex(surf_id,radius,v_id)
         __delete_vertex(v_id)
     
     # Clean up
     cu.cmd("delete curve %d"%l_arc.id())
-    __delete_vertex(v_curve_tile_minima)
+    # __delete_vertex(v_curve_tile_minima)
     
     return surf_id
 ###############################################################################
@@ -251,6 +259,113 @@ def __gen_limiter_back(v_up_wall_l, v_down_wall_l, v_up_wall_r, v_down_wall_r,\
            
     return cu.create_surface((l_arc_up,l_wall_l,l_arc_down,l_wall_r))
 
+###############################################################################
+def __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, tile_height,\
+                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r):
+    # There are four columns of tiles
+    # get into plane of tile-lip
+    # use arc center to define motion along the arc
+    # 
+    prev_surf_ids = cu.get_entities('surface')[-1]
+    for horiz in range(4):
+        
+        for vert in range(2):
+            
+            
+            # Get vector of positions for upper, lower flat section for tiles
+            if vert ==0: # if operating on lower tile
+                v_l = l_flat_down_l.vertices()
+                v_r = l_flat_down_r.vertices()
+            else:
+                v_l = l_flat_up_l.vertices()
+                v_r = l_flat_up_r.vertices()
+
+            # Ensure that we're operating on the upper two verticies in the flat section
+            v_l = v_l[0] if v_l[0].coordinates()[2] > v_l[1].coordinates()[2] else v_l[1]
+            v_r = v_r[0] if v_r[0].coordinates()[2] > v_r[1].coordinates()[2] else v_r[1]
+
+            # vector along top of flat section
+            vec_flat = np.array(v_r.coordinates()) - np.array(v_l.coordinates())
+           
+            # Move along flat section
+            vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + horiz*tile_width)
+            # Get angle of tile center
+            theta_tile = np.arctan2(v_l.coordinates()[1]+vec_flat[1], v_l.coordinates()[0]+vec_flat[0])
+
+            # Build tile
+            cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
+            s_tile_new = cu.get_entities('surface')[-1]            
+
+             # Rotate to face limiter
+            cu.cmd('rotate surface %d about Z angle %f'%\
+                     (s_tile_new, theta_tile*180/np.pi +4 -2*horiz) ) # 4 degree twist to match tile twist)
+             
+            # Move into position, Drop to middle of flat section
+            cu.cmd('surface %d move %f %f %f'%\
+                   (s_tile_new, v_l.coordinates()[0]+vec_flat[0],\
+                    v_l.coordinates()[1]+vec_flat[1], v_l.coordinates()[2]+vec_flat[2] -tile_height/2) )
+            
+           
+            # move out slightly from limiter face
+            cu.cmd('surface %d move %f %f 0'%\
+                     (s_tile_new, -np.cos(theta_tile)*tile_limiter_offset,\
+                        -np.sin(theta_tile)*tile_limiter_offset))
+            
+        ################################################
+        # Curved section
+        # get vector from bottom of top flat section, one side, to top of bottom flat section, same
+        # That angle sets max/min of arc, arc radius is R_curve_minima
+        # Use the previous 
+
+         # Get vector of positions for upper, lower flat section for tiles
+        
+        v_l_d = l_flat_down_l.vertices()
+        v_r_d = l_flat_down_r.vertices()
+        
+        v_l_u = l_flat_up_l.vertices()
+        v_r_u = l_flat_up_r.vertices()
+
+        # Ensure that we're operating on the upper verticies in the lower flat section, and vice versa
+        v_l_d = v_l_d[0] if v_l_d[0].coordinates()[2] > v_l_d[1].coordinates()[2] else v_l_d[1]
+        v_r_d = v_r_d[0] if v_r_d[0].coordinates()[2] > v_r_d[1].coordinates()[2] else v_r_d[1]
+        v_l_u = v_l_u[0] if v_l_u[0].coordinates()[2] < v_l_u[1].coordinates()[2] else v_l_u[1]
+
+        # vector along top of flat section
+        vec_flat = np.array(v_l_d.coordinates()) - np.array(v_r_d.coordinates())
+        
+        # Move along flat section
+        vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + horiz*tile_width)
+        # Get angle of tile center
+        theta_tile = np.arctan2(v_l.coordinates()[1]+vec_flat[1], v_l.coordinates()[0]+vec_flat[0])
+
+        theta_arc = np.arcsin(v_l_d.coordinates()[2]/R_curve_minima)
+
+
+        # Build tile
+        cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
+        s_tile_new = cu.get_entities('surface')[-1]            
+
+        # Rotate to face limiter
+        cu.cmd('rotate surface %d about Z angle %f'%\
+                    (s_tile_new, theta_tile*180/np.pi +4 -2*horiz) ) # 4 degree twist to match tile twist)
+        cu.cmd('rotate surface %d about Y angle %f'%\
+                    (s_tile_new, -theta_arc*180/np.pi) ) # rotate to match arc angle
+             
+        
+        # Place tile at correct location along arc
+        for
+        # Build tile
+        cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
+        s_tile_new = cu.get_entities('surface')[-1]
+
+    # Build block
+    bl = len(cu.get_entities('block'))+1
+    string  = 'block %d surface '%bl
+    for i in np.arange(prev_surf_ids+1, cu.get_entities('surface')[-1]+1): string+= '%d '%i
+    cu.cmd(string)
+    return bl
+
+###############################################################################
 def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m):
     R_cut = R_wall - 4
     # Cut middle out of split limiter
@@ -262,8 +377,10 @@ def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m):
     cu.cmd('Subtract Volume %d from Volume 1 to %d'%(v_brick,v_brick-1))
     
     # Building covering surface unfortunately has to be hardcoded
-    cu.cmd('Create Surface Curve 145 133 139 127')
-    cu.cmd('Create Surface Curve 124 142 130 136')
+    bounding_curves_1 = np.array([145, 133, 139, 127]) + 25
+    bounding_curves_2 = np.array([124, 142, 130, 136]) + 25
+    cu.cmd(f'Create Surface Curve {bounding_curves_1[0]} {bounding_curves_1[1]} {bounding_curves_1[2]} {bounding_curves_1[3]}')
+    cu.cmd(f'Create Surface Curve {bounding_curves_2[0]} {bounding_curves_2[1]} {bounding_curves_2[2]} {bounding_curves_2[3]}')
     s_new = [cu.get_entities('volume')[-2], cu.get_entities('volume')[-1] ]
     
     cu.cmd('Create Cylinder Height 5 Radius 1')
@@ -271,6 +388,7 @@ def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m):
     cu.cmd('Volume %d Move %f %f 0'%\
            (v_cyl, (R_wall-2)*np.cos(theta),(R_wall-2)*np.sin(theta)) )
     cu.cmd('Subtract Volume %d from Volume %d %d'%(v_cyl, s_new[0], s_new[1]))
+
 ###############################################################################
 def __get_R_Wall(eqdsk_file,wall_offset):
     R, Z = __load_boundary_gEqdsk(eqdsk_file,doPlot=False)
