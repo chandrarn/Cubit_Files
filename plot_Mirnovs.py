@@ -63,19 +63,20 @@ def place_Mirnovs(sensor_set='Mirnov',limiter_only=True,m_to_in=False):
         for node_name in X:
             cu.cmd("create sphere radius %f"%.01)
             sph_id.append( cu.get_entities('volume')[-1] )
+
             cu.cmd("move volume %d X %f Y %f Z %f"%(sph_id[-1],X[node_name],\
                                                     Y[node_name],Z[node_name]) )
         cu.cmd('Group "BP" Equals Volume %d to %d'%( sph_id[0],sph_id[-1]))
 
 # Helper function to place Mirnov sensors
-def __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in=False):
+def __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_in=False,
+                          sph_radius=0.005):
     # Place Mirnov sensor at location
     if m_to_in: 
         R_adj/=0.0254
         R[node_name]/=0.0254
         Z[node_name]/=0.0254
-        sph_radius = 0.01/0.0254
-    else: sph_radius = 0.01 
+        sph_radius /= 0.0254
 
     cu.cmd("create sphere radius %f"%sph_radius)
     sph_id.append( cu.get_entities('volume')[-1] )
@@ -83,6 +84,10 @@ def __place_Mirnov_sensor(node_name, R, Z, phi, phase_offset, R_adj,sph_id,m_to_
             (R[node_name] + R_adj)*np.cos(phi[node_name]*np.pi/180 + phase_offset*np.pi/180), 
             (R[node_name] + R_adj)*np.sin(phi[node_name]*np.pi/180 + phase_offset*np.pi/180), 
             Z[node_name]) ) 
-    cu.cmd("color volume %d rgb 0 0 0"%sph_id[-1])
+    print(node_name)
+    #if 'T' not in node_name: cu.cmd("color volume %d rgb 0 0 0"%sph_id[-1])
+    if  '06_ABK' in node_name or '06_GHK' in node_name: 
+        cu.cmd("color volume %d rgb .4 .4 .4"%sph_id[-1])
+    else: cu.cmd("color volume %d rgb 0 0 0"%sph_id[-1])
 
 if __name__=='__main__':place_Mirnovs()

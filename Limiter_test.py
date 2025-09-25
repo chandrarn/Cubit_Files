@@ -18,7 +18,7 @@ y_shft = 0 # shift y coorinate to allow side-by-side comparison with CAD
 
 def unsplit_limiter(in_to_m=True,eqdsk_file='g1051202011.1000',
                     doMesh=False,theta=-3.0105,save_ext='',doReset=True,
-                    buildSplit=False,adj_face_id=0,skip=[8,13],limiter_side_surfs=[177,178,179,180]):
+                    buildSplit=False,adj_face_id=0,skip=[8,13],limiter_side_surfs=[14,10]):#[177,178,179,180]
     if doReset: cu.cmd('reset')
     cu.cmd('undo off')
     v_start = cu.get_entities('volume')[-1]+1 if len(cu.get_entities('volume')) >0 else 1
@@ -27,15 +27,16 @@ def unsplit_limiter(in_to_m=True,eqdsk_file='g1051202011.1000',
     # Coordinates reference the middle of the limiter
     Z_lim = 10.41 # maximum height +/- of the tile edges
     Z_tile_lip = 1.21 # the first and last tile are flat
-    R_tile = 32.54
-    wall_offset = 0.02 # Offset of limiter from wall [cm]
+    R_tile = 32.54+0.5
+    wall_offset = 0.01 # Offset of limiter from wall [cm]
     R_wall = __get_R_Wall(eqdsk_file,wall_offset)
-    R_curve_minima = 36.42 # Radius of deepest curve of limiter
+    R_curve_minima = 36.42+0.5 # Radius of deepest curve of limiter
     # theta = -3.0105 origin to center of limiter angle
     # Tile dimensions
-    tile_width = 1.46*0.0254 # m
-    tile_height = 1.237 *0.0254 # m
-    tile_limiter_offset = 0.017 # m, distance from tile front face to limiter surface
+    tile_width = 1.46+.0 # in
+    tile_height = 1.237+.0  # in
+    tile_limiter_offset = 0.66 # in, distance from tile front face to limiter surface
+    R_limiter_curve = 0.84/0.0254 # Radius of curvature of limiter, used for tile placement
     
     # Shifts in x, y necessary because edges of limiter are parallel, not rays from origin
     x = lambda r,theta: r*np.cos(theta)
@@ -69,40 +70,58 @@ def unsplit_limiter(in_to_m=True,eqdsk_file='g1051202011.1000',
     
     # Cut out holes in side plates
     surf_id_l = __make_cutouts(s_lim_surf_l,-x1,y1,x_l,y_l,theta,skip=skip,
-                               adj_surf_id=adj_face_id)
+                               adj_surf_id=adj_face_id,doSplit=buildSplit)
 
     #
     surf_id_r = __make_cutouts(s_lim_surf_r,x1,-y1,x_r,y_r,theta,skip=skip,
-                               extraHoles=True,adj_surf_id=adj_face_id)
+                               extraHoles=True,adj_surf_id=adj_face_id,doSplit=buildSplit)
     
+    # Store coordinates along the curved arc for tile placement
+    l_arc_points, l_arc_center = __get_arc_points(l_arc_l, frac_points= 15)
+
     # Cut arc curve
-    surf_id_r = __make_arc_cutout(surf_id_r,R_tile,theta,Z_lim,Z_tile_lip,x_r,y_r,R_curve_minima)
+    # surf_id_r = __make_arc_cutout(surf_id_r,R_tile,theta,Z_lim,Z_tile_lip,\
+    #                               x_r,y_r,R_curve_minima, buildSplit)
     
-    if buildSplit: gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m)
-    
+    # Split limiter in half if necessary
+    if buildSplit:gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m)
+    #raise SyntaxError
+    # Build block for limiter (tiles are done separately)
     v_end = cu.get_entities('volume')[-1]
     s_end = cu.get_entities('surface')[-1]
     id_group = cu.create_new_group()
-    
-    
     cu.cmd('Group %d Add Volume %d to %d'%(id_group,v_start,v_end))
-    cu.cmd('Delete Vertex All')
-    cu.cmd('Delete Curve All')
-    if in_to_m: cu.cmd('Group %d Scale %f'%(id_group,0.0254)) # convert to meters if necessary
-    
     bl = len(cu.get_entities('block'))+1
     string  = 'block %d surface '%bl
     for i in np.arange(s_start, s_end+1): string+= '%d '%i
     cu.cmd(string)
+
     
     ##########################################
     # Building tiles to sit just in front of the limiter surface
-    __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, tile_height,\
-                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r)
+    block_tiles, start_surf_id_tiles =  __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, tile_height,\
+                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r,buildSplit,
+                    in_to_m, x_r,y_r, x_l,y_l, theta,l_arc_points, l_arc_center,R_limiter_curve)
+    # Adding the tiles to the limiter sides allows only increasing mesh density for necessary surfaces
 
-    if doMesh: __do_Mesh(id_group,save_ext,s_lim_surf_l,s_lim_surf_r,s_start,s_end,limiter_side_surfs)
+    surf_id_tiles = np.arange(start_surf_id_tiles+1, cu.get_entities('surface')[-1]+1)
 
-    return id_group, limiter_side_surfs
+    # Clean up vertexes and curves
+    cu.cmd('Delete Vertex All')
+    cu.cmd('Delete Curve All')
+
+    # Scale if desired
+    if in_to_m: 
+        cu.cmd('Group %d Scale %f'%(id_group,0.0254)) # convert to meters if necessary
+        cu.cmd('Group %d Scale %f'%(id_group+1,0.0254)) # convert to meters if necessary
+
+    if doMesh:
+        # Meshing handles tiles ok as well
+        __do_Mesh(id_group,save_ext,s_lim_surf_l,s_lim_surf_r,s_start, \
+                  cu.get_entities('surface')[-1],limiter_side_surfs,bl,surf_id_tiles,buildSplit)
+
+    return id_group, limiter_side_surfs, surf_id_tiles
+
 ###################################################
 def __gen_unsplit_limiter_side(theta,R_wall,R_tile,R_curve_minima,Z_lim,Z_tile_lip,x,y):
     
@@ -176,7 +195,7 @@ def __gen_limiter_face(v_up_l,v_up_r,v_down_l,v_down_r,v_sub_up_l,v_sub_down_l, 
 
 ##########################################################
 def __make_cutouts(surface,dx,dy,x,y,theta,adj_surf_id=0,skip=[8,13],
-                   extraHoles=False,debug_large=False,debug_small=True):
+                   extraHoles=False,debug_large=False,debug_small=True,doSplit=False):
     # Large cutout
     x0 = 38.5541*np.cos(theta)
     y0 = 38.5541*np.sin(theta)
@@ -188,29 +207,33 @@ def __make_cutouts(surface,dx,dy,x,y,theta,adj_surf_id=0,skip=[8,13],
         surf_id = __cut_hole(surf_id, sph_radius,\
              x0 + dx - sph_radius*0, y0 + dy+ y_shft, z0*(-1 if i==1 else 1))
     
+    return surf_id
+
     ##########################################################################33
     # # Small holes [vertical]
-    x0 = 40.59187*np.cos(theta)
-    y0 = 40.59187*np.sin(theta)
+    x0 = (40.59187+(0.5 if doSplit else -0.3))*np.cos(theta)
+    y0 = (40.59187+(0.5 if doSplit else -0.3))*np.sin(theta)
     z0 = -9.162
     dz = 0.848
-    sph_radius = 0.203
+    sph_radius = 0.203*1.75
     for i in range(22):
         if i in skip: continue
         
         surf_id = __cut_hole(surf_id, sph_radius,  x0 + dx - sph_radius, y0+dy+ y_shft, z0+dz*i)
     ##########################################################################
     
+    
+
     # May not need for both sides
     if extraHoles:
         # Horizontal holes
-        x0 = 40.148477*np.cos(theta) + dx
+        x0 = (40.148477)*np.cos(theta) + dx
         y0 = 40.148477*np.sin(theta) + dy + y_shft 
         z0_1 = -9.5#-10.17045
-        z0_2 = -2.25
+        z0_2 = -2.25 -1
         dr = 0.7483
-        R0 = 40.14848
-        radius = 0.141
+        R0 = (40.14848 -0.5)
+        radius = 0.141*2
         for i in range(2):
             for j in range(8): 
                 surf_id = __cut_hole(surf_id, radius,\
@@ -222,10 +245,10 @@ def __make_cutouts(surface,dx,dy,x,y,theta,adj_surf_id=0,skip=[8,13],
             
     return surf_id
 ##############################################################################
-def __make_arc_cutout(surf_id,R_tile,theta,Z_lim,Z_tile_lip,x,y,R_curve_minima):
+def __make_arc_cutout(surf_id,R_tile,theta,Z_lim,Z_tile_lip,x,y,R_curve_minima,buildSplit=False):
     # Build second tile arch, set back slightly
-    dr = 1.095
-    radius = 0.141
+    dr = (1.095-0.25)
+    radius = (0.141*2)
     v_up_sub_tile = cu.create_vertex(x(R_tile+dr,theta), y(R_tile+dr,theta), +(Z_lim-Z_tile_lip))
     v_down_sub_tile = cu.create_vertex(x(R_tile+dr,theta), y(R_tile+dr,theta), -(Z_lim-Z_tile_lip))
     
@@ -235,8 +258,10 @@ def __make_arc_cutout(surf_id,R_tile,theta,Z_lim,Z_tile_lip,x,y,R_curve_minima):
     
     l_arc = cu.create_arc_curve(v_up_sub_tile,v_down_sub_tile,v_curve_tile_minima.coordinates())
     # Iterarte along curve
-    for i in np.linspace(0,1,16,): 
-        cu.cmd("create s_tile_upvertex on curve %d fraction %f"%(l_arc.id(),i))
+    for ind,i in enumerate(np.linspace(0,1,16,)): 
+        if buildSplit and (5<ind<10): continue # Skip middle section if splitting limiter
+         # Create vertex on curve
+        cu.cmd("create vertex on curve %d fraction %f"%(l_arc.id(),i))
         v_id =  cu.get_entities('vertex')[-1]
         surf_id = __cut_hole_vertex(surf_id,radius,v_id)
         __delete_vertex(v_id)
@@ -260,13 +285,26 @@ def __gen_limiter_back(v_up_wall_l, v_down_wall_l, v_up_wall_r, v_down_wall_r,\
     return cu.create_surface((l_arc_up,l_wall_l,l_arc_down,l_wall_r))
 
 ###############################################################################
+def __get_arc_points(l_arc, frac_points=15):
+    center_point = l_arc.curve_center()
+    l_points = []
+    for i in np.linspace(1/frac_points/2,1-1/frac_points/2,frac_points,endpoint=True): 
+        l_points.append( l_arc.position_from_fraction(i) )
+    
+    return l_points, center_point
+###############################################################################
 def __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, tile_height,\
-                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r):
+                  tile_limiter_offset,l_flat_down_l,l_flat_down_r,l_flat_up_l,l_flat_up_r,\
+                    buildSplit, in_to_m ,x_r,y_r, x_l,y_l, theta, l_arc_points, l_arc_center,
+                    R_limiter_curve):
     # There are four columns of tiles
     # get into plane of tile-lip
     # use arc center to define motion along the arc
     # 
+    tile_correction_width = 1.04 # Unclear why this is necessary, but without it the tiles don't line up properly
     prev_surf_ids = cu.get_entities('surface')[-1]
+    prev_vol_ids = cu.get_entities('volume')[-1]
+
     for horiz in range(4):
         
         for vert in range(2):
@@ -288,12 +326,12 @@ def __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, til
             vec_flat = np.array(v_r.coordinates()) - np.array(v_l.coordinates())
            
             # Move along flat section
-            vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + horiz*tile_width)
+            vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + tile_correction_width*horiz/4*(np.linalg.norm(vec_flat)))
             # Get angle of tile center
             theta_tile = np.arctan2(v_l.coordinates()[1]+vec_flat[1], v_l.coordinates()[0]+vec_flat[0])
 
             # Build tile
-            cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
+            cu.cmd('create surface rectangle width %f height %f xplane'%(tile_height,tile_width))
             s_tile_new = cu.get_entities('surface')[-1]            
 
              # Rotate to face limiter
@@ -331,45 +369,92 @@ def __build_tiles(R_curve_minima,s_face, s_tile_up, s_tile_down, tile_width, til
         v_l_u = v_l_u[0] if v_l_u[0].coordinates()[2] < v_l_u[1].coordinates()[2] else v_l_u[1]
 
         # vector along top of flat section
-        vec_flat = np.array(v_l_d.coordinates()) - np.array(v_r_d.coordinates())
+        vec_flat = np.array(v_r_d.coordinates()) - np.array(v_l_d.coordinates())
         
         # Move along flat section
-        vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + horiz*tile_width)
+        vec_flat = vec_flat/np.linalg.norm(vec_flat) * (tile_width/2 + tile_correction_width*horiz/4*(np.linalg.norm(vec_flat)))
         # Get angle of tile center
-        theta_tile = np.arctan2(v_l.coordinates()[1]+vec_flat[1], v_l.coordinates()[0]+vec_flat[0])
+        theta_tile = np.arctan2(v_l_d.coordinates()[1]+vec_flat[1], v_l_d.coordinates()[0]+vec_flat[0])
 
-        theta_arc = np.arcsin(v_l_d.coordinates()[2]/R_curve_minima)
+        l_arc_center = np.array([R_limiter_curve*np.cos(theta),R_limiter_curve*np.sin(theta),0]) 
+        theta_arc = -0.790843609840896#np.arctan2(l_arc_points[-1][1]-l_arc_center[1], l_arc_points[-1][0]-l_arc_center[0]) +np.pi/4
 
 
-        # Build tile
-        cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
-        s_tile_new = cu.get_entities('surface')[-1]            
-
-        # Rotate to face limiter
-        cu.cmd('rotate surface %d about Z angle %f'%\
-                    (s_tile_new, theta_tile*180/np.pi +4 -2*horiz) ) # 4 degree twist to match tile twist)
-        cu.cmd('rotate surface %d about Y angle %f'%\
-                    (s_tile_new, -theta_arc*180/np.pi) ) # rotate to match arc angle
-             
         
         # Place tile at correct location along arc
-        for
-        # Build tile
-        cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
-        s_tile_new = cu.get_entities('surface')[-1]
+        for ind,angle in enumerate(np.linspace(0, 2*theta_arc, 15,endpoint=True)):
+            if buildSplit and 5<ind<9: continue
 
-    # Build block
+            # Build tile
+            cu.cmd('create surface rectangle width %f height %f xplane'%(tile_height,tile_width))
+            s_tile_new = cu.get_entities('surface')[-1]            
+
+            # Rotate to face limiter
+            cu.cmd('rotate surface %d about Y angle %f'%\
+                        (s_tile_new, (theta_arc-angle)*180/np.pi) ) # rotate to match arc angle
+            
+            cu.cmd('rotate surface %d about Z angle %f'%\
+                        (s_tile_new, theta_tile*180/np.pi +4 -2*horiz) ) # 4 degree twist to match tile twist)
+            
+            
+            x_ =  x_l(R_curve_minima+1*tile_limiter_offset,angle) #+ x_r(R_curve_minima+1*tile_limiter_offset,theta_tile) )/2
+            y_ =  y_l(R_curve_minima+1*tile_limiter_offset,angle) #+ y_r(R_curve_minima+1*tile_limiter_offset,theta_tile) )/2
+            
+            # test increasing x, y as angle gets closer to zero
+
+            x_arc = x_#(R_curve_minima-tile_limiter_offset)*np.cos(theta_tile)
+            y_arc = y_#(R_curve_minima-tile_limiter_offset)*np.sin(theta_tile)
+            z_arc = (R_curve_minima-0*tile_limiter_offset)*np.sin(angle)
+            
+            
+
+            # Move along flat section
+            cu.cmd('surface %d move %f %f %f'%\
+                   (s_tile_new, l_arc_points[ind][0]+vec_flat[0],\
+                    l_arc_points[ind][1]+vec_flat[1], l_arc_points[ind][2]+vec_flat[2] ) )
+            
+           
+            # # move out slightly from limiter face
+            cu.cmd('surface %d move %f %f %f'%\
+                     (s_tile_new, -np.cos(theta_tile)*tile_limiter_offset,\
+                        -np.sin(theta_tile)*tile_limiter_offset,np.sin(theta_arc-angle)*tile_limiter_offset))
+            
+            # # Move to arc location
+            # cu.cmd('surface %d move %f %f %f'%\
+            #        (s_tile_new, x_arc, y_arc, z_arc) )
+            
+            
+            # # move out slightly from limiter face
+            # cu.cmd('surface %d move %f %f 0'%\
+            #          (s_tile_new, -np.cos(theta_tile)*tile_limiter_offset,\
+            #             -np.sin(theta_tile)*tile_limiter_offset))
+        # Build tile
+        # cu.cmd('create surface rectangle width %f height %f xplane'%(tile_width,tile_height))
+        # s_tile_new = cu.get_entities('surface')[-1]
+
+    v_end = cu.get_entities('volume')[-1]
+    id_group = cu.create_new_group()
+    
+    
+    # raise SyntaxError
+    cu.cmd('Group %d Add Volume %d to %d'%(id_group,prev_vol_ids+1,v_end))
+    # cu.cmd('Delete Vertex All')
+    # cu.cmd('Delete Curve All')
+    # if in_to_m: cu.cmd('Group %d Scale %f'%(id_group,0.0254)) # convert to meters if necessary
+    
+    
     bl = len(cu.get_entities('block'))+1
     string  = 'block %d surface '%bl
     for i in np.arange(prev_surf_ids+1, cu.get_entities('surface')[-1]+1): string+= '%d '%i
     cu.cmd(string)
-    return bl
+
+    return bl, prev_surf_ids
 
 ###############################################################################
-def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m):
+def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m,H_Split=4):
     R_cut = R_wall - 4
     # Cut middle out of split limiter
-    cu.cmd("Create Brick X 10 Y 10 Z %f"%(2))
+    cu.cmd("Create Brick X 10 Y 10 Z %f"%(H_Split))
     v_brick = cu.get_entities('volume')[-1]
     cu.cmd('Volume %d Rotate %f About Z'%(v_brick,theta*np.pi/180))
     cu.cmd('Volume %d Move %f %f 0'%(v_brick, R_cut*np.cos(theta), R_cut*np.sin(theta)) )
@@ -377,12 +462,13 @@ def gen_Split(theta,R_wall,s_lim_surf_l,s_lim_surf_r,s_face,s_back,in_to_m):
     cu.cmd('Subtract Volume %d from Volume 1 to %d'%(v_brick,v_brick-1))
     
     # Building covering surface unfortunately has to be hardcoded
-    bounding_curves_1 = np.array([145, 133, 139, 127]) + 25
-    bounding_curves_2 = np.array([124, 142, 130, 136]) + 25
+    bounding_curves_1 = np.array([145, 133, 139, 127]) -79#+ 25
+    bounding_curves_2 = np.array([124, 142, 130, 136]) -79#+ 25
     cu.cmd(f'Create Surface Curve {bounding_curves_1[0]} {bounding_curves_1[1]} {bounding_curves_1[2]} {bounding_curves_1[3]}')
     cu.cmd(f'Create Surface Curve {bounding_curves_2[0]} {bounding_curves_2[1]} {bounding_curves_2[2]} {bounding_curves_2[3]}')
     s_new = [cu.get_entities('volume')[-2], cu.get_entities('volume')[-1] ]
-    
+   
+   
     cu.cmd('Create Cylinder Height 5 Radius 1')
     v_cyl = cu.get_entities('volume')[-1]
     cu.cmd('Volume %d Move %f %f 0'%\
@@ -417,32 +503,50 @@ def __delete_vertex(verticies):
         cu.cmd('Delete vertex %d'%v)
 
 ##########################################################
-def __do_Mesh(id_group,save_ext,s_lim_surf_l,s_lim_surf_r,s_start,s_end,limiter_side_surfs):
+def __do_Mesh(id_group,save_ext,s_lim_surf_l,s_lim_surf_r,s_start,s_end,\
+              limiter_side_surfs,first_block,surf_id_tiles,doSplit):
     cu.cmd('delete vertex all')
-
+    
     cu.cmd('imprint body %d to %d'%(s_start,s_end))
     cu.cmd('merge body %d to %d'%(s_start,s_end))
     cu.cmd("set duplicate block elements off")
 
+    cu.cmd("merge surface %d to %d"%(s_start,s_end))
     # Test adaptive mesh only on limiter sides
     #     
-    bl = len(cu.get_entities('block'))
-    print(s_lim_surf_l,s_lim_surf_r,s_start,s_end)
+    if not doSplit: 
+
+        print(s_start,s_end,limiter_side_surfs,surf_id_tiles)
+        #raise SyntaxError
     #raise SyntaxError
     cu.cmd("surface all scheme trimesh")
         
     cu.cmd("set trimesher coarse off")
     cu.cmd("set trimesher geometry sizing off")
     cu.cmd("surface all scheme trimesh")
-    cu.cmd('Surface all Size 0.02') 
+    cu.cmd('Surface all Size 1') 
+
+    s_ = ''
+    for i in surf_id_tiles: s_+= '%d '%i #surf_id_tiles
+    #cu.cmd('Surface {s_} Size 0.001') 
+    cu.cmd(f'surface {s_} sizing function type skeleton scale 3.'+\
+             ' time_accuracy_level 3 min_size 2')
 
     # Finer mesh on limiter sides
     s_ = ''
-    for i in limiter_side_surfs: s_+= '%d '%i
-    cu.cmd(f'surface {s_} sizing function type skeleton scale 1.'+\
-             ' time_accuracy_level 3 min_size .1')
+    for i in limiter_side_surfs: s_+= '%d '%i #limiter_side_surfs
+    cu.cmd(f'surface {s_} sizing function type skeleton scale 2.'+\
+             ' time_accuracy_level 3 min_size .5')
     
     cu.cmd("mesh surface %d to %d"%(s_start,s_end))
-    
+    #raise SyntaxError
     cu.cmd("set large exodus file on")
-    cu.cmd("export genesis 'C_Mod_ThinCurr_Limiters%s.g' block %d overwrite"%(save_ext,bl))
+    cu.cmd("export genesis 'C_Mod_ThinCurr_Limiters%s.g' block %d %d overwrite"%\
+           (save_ext,first_block, first_block+1))
+
+
+######################################################3
+if __name__ == "__main__": 
+    # unsplit_limiter(doMesh=False,in_to_m=True,doReset=True,)
+    unsplit_limiter(doMesh=True,in_to_m=True,doReset=True,)
+    # unsplit_limiter(doMesh=False,in_to_m=True,doReset=True,theta=0.62833062,buildSplit=True,skip=[8,12,13])

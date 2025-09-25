@@ -34,11 +34,11 @@ def build_VV(eqdsk_file='g1051202011.1000',doMesh=True,s_id_wall=14,
     
     # Build permimter curve, rotation 360deg
     surf_ids = __build_surface(rlim, zlim, c_0,s_0)
-    # return
+    
 
     # Cut port holes
     __do_Cut_Ports(surf_ids,s_id_wall)
-    
+
     # Group together
     id_group = cu.create_new_group()
     cu.add_entities_to_group(id_group, surf_ids, 'surface')
@@ -58,7 +58,7 @@ def build_VV(eqdsk_file='g1051202011.1000',doMesh=True,s_id_wall=14,
     # Build Mesh
     if doMesh:__do_Mesh(s_0, id_group,surf_ids,save_Ext)
         
-    return 
+    return id_group
 ################################################################################
 def __build_surface(rbdry,zbdry,c_0,s_0):
     # Start cross-section on y-axis, x=0
@@ -78,6 +78,7 @@ def __build_surface(rbdry,zbdry,c_0,s_0):
     cu.cmd('Sweep Curve %d to %d Zaxis Angle 360'%(c_0+1, curves_end))
     surf_ids = np.arange(1+s_0,cu.get_entities('surface')[-1]+1,dtype=int).tolist()
 
+    cu.cmd('Delete Curve All')
     return surf_ids
 
 ################################################################################
@@ -126,7 +127,7 @@ def __do_Cut_Ports(surf_ids,s_id_wall):
         theta_0 = 36*i + 18
         # Build subtraction surface outline
         curves = __make_port_block(i,R,radial_deg,theta_0)
-        
+        #raise SyntaxError
         # Subtract from vv wall
         __subtract(curves,surf_ids,theta_0,thicken_depth,s_id_wall)
     surf_ids.append( cu.get_entities('surface')[-1]) 

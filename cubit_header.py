@@ -14,7 +14,8 @@ cubit_path = '/home/rianc/Documents/Coreform-Cubit-2025.1/bin/'
 from subprocess import check_output, STDOUT
 import numpy as np
 try:from freeqdsk import geqdsk
-except:import json
+except:pass
+import json
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
